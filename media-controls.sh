@@ -1,45 +1,55 @@
 #!/usr/bin/env bash
 
-# Function to fetch player info
+# Path for cached cover art
+COVER="/tmp/player_cover.jpg"
+
+# Function to fetch player info and update YAD
 get_info() {
-    TOOLTIP=$(playerctl metadata title 2>/dev/null)
-    COMMAND="playerctl play-pause"
-    COVER_URL=$(playerctl metadata | grep artUrl | awk '{ print $3 }')
-    ARTIST=$(playerctl metadata artist)
+    local title artist cover_url status icon text menu
 
-    ICON_PLAY=""   # Font Awesome music icon
-    ICON_PAUSE=""  # Font Awesome pause icon
-    ICON_STOP=""   # Font Awesome stop icon
+    # Fetch metadata
+    title=$(playerctl metadata title 2>/dev/null)
+    artist=$(playerctl metadata artist 2>/dev/null)
+    cover_url=$(playerctl metadata mpris:artUrl 2>/dev/null | tr -d '"')
 
-    if [[ -n "$COVER_URL" ]]; then
-        COVER=$(mktemp --suffix=.jpg)
-        curl -s "$COVER_URL" --output "$COVER"
-    else
-        COVER=""
+    # Download cover only if URL changed
+    if [[ -n "$cover_url" && "$cover_url" != "$LAST_COVER_URL" ]]; then
+        curl -s "$cover_url" -o "$COVER"
+        LAST_COVER_URL="$cover_url"
     fi
 
-    STATUS=$(playerctl status)
-    case "$STATUS" in
-        Playing) ICON=$ICON_PLAY ;;
-        Paused) ICON=$ICON_PAUSE ;;
-        Stopped) ICON=$ICON_STOP ;;
-        *) ICON=$ICON_STOP ;;
+    # Determine status icon
+    status=$(playerctl status 2>/dev/null)
+    case "$status" in
+        Playing) icon="" ;;   # Play
+        Paused)  icon="" ;;   # Pause
+        Stopped) icon="" ;;   # Stop
+        *)       icon="" ;;
     esac
 
-    TEXT="Now Playing: $TOOLTIP by $ARTIST"
-    MENU="$TOOLTIP - $ARTIST| Next!playerctl next| Previous!playerctl previous|$ICON Play/Pause!playerctl play-pause"
+    # Tooltip text
+    text="Now Playing: ${title:-Unknown} by ${artist:-Unknown}"
+
+    # YAD menu
+    menu="${title:-Unknown} - ${artist:-Unknown}| Next!playerctl next| Previous!playerctl previous|$icon Play/Pause!playerctl play-pause"
 
     # Send updates to YAD
-    echo "icon:$COVER"
-    echo "tooltip:$TEXT"
-    echo "menu:$MENU"
+    echo "icon:${COVER}"
+    echo "tooltip:${text}"
+    echo "menu:${menu}"
 }
 
 # Start YAD with dynamic updates
 (
     echo "tooltip:Loading..."
+    LAST_TITLE=""
+    LAST_COVER_URL=""
     while true; do
-        get_info
+        TITLE=$(playerctl metadata title 2>/dev/null)
+        if [[ "$TITLE" != "$LAST_TITLE" ]]; then
+            get_info
+            LAST_TITLE="$TITLE"
+        fi
         sleep 1
     done
 ) | yad --notification --listen --command="playerctl play-pause" --icon-size=64 --no-middle
